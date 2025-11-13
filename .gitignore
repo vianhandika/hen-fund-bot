@@ -1,7 +1,8 @@
 node_modules/
 dist/
 .env
-src/storage/files/symbol.json
-src/storage/files/journal-*.json
-src/storage/files/states/
-src/storage/files/locks/
+
+# src/storage/files/symbol.json
+# src/storage/files/journal-*.json
+# src/storage/files/states/
+# src/storage/files/locks/
