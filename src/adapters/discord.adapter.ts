@@ -8,14 +8,13 @@ type Parsed = { symbol: string; fundingRate: number; createdAt: string } | null;
 
 /* ----------------------------- Helpers ----------------------------- */
 
-// Hilangkan formatting markdown/link di Discord
 const stripMd = (s: string) =>
-  String(s || '')
-    // [TEXT](url) -> TEXT
-    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
-    // <...> -> (hapus)
-    .replace(/<[^>]+>/g, '')
-    .trim();
+  normalizeMinus(
+    String(s || '')
+      .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+      .replace(/<[^>]+>/g, '')
+      .trim()
+  );
 
 const normalizeBybitPair = (raw?: string) => {
   if (!raw) return undefined;
@@ -53,9 +52,33 @@ const pickSymbolFromText = (s?: string) => {
   return undefined;
 };
 
+const normalizeMdEscapes = (s: string) =>
+  String(s || '').replace(/\\(?=[.%])/g, '');
+
+const normalizeMinus = (s: string) =>
+  String(s || '').replace(/[\u2212\u2010-\u2015]/g, '-');
+
 const pickFunding = (s?: string) => {
   if (!s) return undefined;
-  const m = s.match(/([+-]?\d+(?:\.\d+)?)\s*%/);
+
+  const clean = normalizeMdEscapes(normalizeMinus(s));
+
+  const fundingLineMatch = clean.match(/Funding\s*Rate\s*:(.*)/i);
+  const target = fundingLineMatch ? fundingLineMatch[1] : clean;
+
+  const m = target.match(/([+-]?\d+(?:\.\d+)?)\s*%/);
+
+  // logger.info(
+  //   {
+  //     original: s,
+  //     clean,
+  //     target,
+  //     match0: m ? m[0] : null,
+  //     match1: m ? m[1] : null,
+  //   },
+  //   'DEBUG pickFunding'
+  // );
+
   return m ? Number(m[1]) : undefined;
 };
 
@@ -93,7 +116,14 @@ const parseFromEmbed = (msg: any): Parsed => {
 
   // 2) funding dari field
   const frFieldRaw = getField('funding') || '';
-  let fundingRate: number | undefined = pickFunding(stripMd(frFieldRaw));
+  const frStripped = stripMd(frFieldRaw);
+
+  logger.info(
+    { frFieldRaw, frStripped },
+    'DEBUG funding field (before pickFunding)'
+  );
+
+  let fundingRate: number | undefined = pickFunding(frStripped);
 
   // 3) URL sources
   if (!symbol) {
@@ -236,29 +266,41 @@ export const startDiscord = async () => {
     try {
       let parsed: Parsed = null;
 
-      // 1) AO alert channel (embed)
       if (alertId && msg.channelId === alertId) {
         parsed = parseFromEmbed(msg);
       }
 
-      // 2) Manual channel (text) — hanya kalau bukan bot
       if (!parsed && manualId && msg.channelId === manualId && !msg.author.bot) {
         parsed = parseManual(msg.content);
       }
 
       if (!parsed) return;
 
-      await ingestSignal(parsed);
-      logger.info(
-        {
-          symbol: parsed.symbol,
-          fr: parsed.fundingRate,
-          at: parsed.createdAt,
-          ch: msg.channelId,
-        },
-        'Signal ingested (Discord)'
-      );
-      await msg.react('✅').catch(() => {});
+      const accepted = await ingestSignal(parsed);
+
+      if (accepted) {
+        logger.info(
+          {
+            symbol: parsed.symbol,
+            fr: parsed.fundingRate,
+            at: parsed.createdAt,
+            ch: msg.channelId,
+          },
+          'Signal queued (Discord)'
+        );
+        await msg.react('✅').catch(() => {});
+      } else {
+        logger.info(
+          {
+            symbol: parsed.symbol,
+            fr: parsed.fundingRate,
+            at: parsed.createdAt,
+            ch: msg.channelId,
+          },
+          'Signal rejected (Discord)'
+        );
+        await msg.react('⏭️').catch(() => {}); 
+      }
     } catch (e) {
       logger.error(e, 'Discord handler error');
       await msg.react('⚠️').catch(() => {});

@@ -50,13 +50,13 @@ export const ingestSignal = async (item: {
   symbol: string;
   fundingRate: number;
   createdAt: string;
-}) => {
+}): Promise<boolean> => {
   if (shouldSkipByWindowAndFunding(item.fundingRate, item.createdAt)) {
     logger.info(
       { symbol: item.symbol, fr: item.fundingRate, at: item.createdAt },
       'signal skipped by funding/time window'
     );
-    return;
+    return false;
   }
 
   if (await isSymbolBusy(item.symbol)) {
@@ -64,10 +64,11 @@ export const ingestSignal = async (item: {
       { symbol: item.symbol, reason: 'BUSY' },
       'signal ignored (already running/queued/locked)'
     );
-    return;
+    return false;
   }
 
   await upsertSymbolIfNotExists(item);
+  return true;
 };
 
 export const runOrchestratorTick = async () => {
