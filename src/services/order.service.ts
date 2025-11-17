@@ -37,12 +37,14 @@ export const placeEntryShort = async (
   lev: number,
   meta: SymbolMeta
 ) => {
-  await setLeverage(symbol, lev).catch((e) => {
-    logger.warn(
-      { symbol, lev, err: String(e?.message ?? e) },
-      'setLeverage warn'
-    );
-  });
+  if (lev > 0) {
+    await setLeverage(symbol, lev).catch((e) => {
+      logger.warn(
+        { symbol, lev, err: String(e?.message ?? e) },
+        'setLeverage warn'
+      );
+    });
+  }
 
   const qtyAdj = Math.max(qty, meta.minOrderQty);
   return placeMarketShort(symbol, qtyAdj, `ENTRY-${Date.now()}`);
