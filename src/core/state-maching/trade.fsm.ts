@@ -14,7 +14,8 @@ export const onFill = (
 
     case 'DCA1':
     case 'DCA2':
-    case 'DCA3': {
+    case 'DCA3':
+    case 'DCA4': {
       const legs = [
         { price: state.entry.price, qty: state.entry.qty },
         ...state.dca
@@ -22,25 +23,30 @@ export const onFill = (
           .map((d) => ({ price: d.price, qty: d.qty })),
         { price: ev.price, qty: ev.qty },
       ];
+
       state.avgPrice = calcVWAP(legs);
+
       const target = state.dca.find((d) => d.id === ev.tag);
       if (target) target.status = 'FILLED';
+
+      // re-anchor TP1/TP2/TP3 dari avg baru
       reanchorFromAvg(state, meta.tickSize);
       return state;
     }
 
     case 'TP1':
     case 'TP2':
-    case 'TP3':
-    case 'TP4': {
+    case 'TP3': {
       const id = ev.tag;
-      state.tp = state.tp.map((t) => (t.id === id ? { ...t, status: 'FILLED' } : t));
+      state.tp = state.tp.map((t) =>
+        t.id === id ? { ...t, status: 'FILLED' } : t
+      );
       (state.flags as any)[id.toLowerCase()] = true;
       return state;
     }
 
+    // SL (lock/BEP/TP1) akan di-handle di watcher, di sini kita cuma nggak mengubah state
     case 'SL':
-    case 'TRAIL':
       return state;
   }
 };

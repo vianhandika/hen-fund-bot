@@ -1,4 +1,3 @@
-// src/utils/ws.selftest.ts
 import WebSocket from 'ws';
 import { logger } from '../utils/logger.js';
 import { ENV } from '../config/index.js';
@@ -9,7 +8,7 @@ import {
   maskKey,
 } from './ws.auth.js';
 
-const WS_PRIVATE = 'wss://stream.bybit.com/v5/private';
+const WS_PRIVATE = String(ENV.BYBIT_WS_PRIVATE_URL ?? '').trim();
 
 type TryPlan =
   | { kind: 'V5_EXPIRES'; label: string }
@@ -18,8 +17,8 @@ type TryPlan =
 
 const plans: TryPlan[] = [
   { kind: 'V5_EXPIRES', label: 'AUTH v5(GET/realtime+expires)' },
-  { kind: 'TS_MS',      label: 'AUTH ts+key (ms)' },
-  { kind: 'TS_SEC',     label: 'AUTH ts+key (s)'  },
+  { kind: 'TS_MS', label: 'AUTH ts+key (ms)' },
+  { kind: 'TS_SEC', label: 'AUTH ts+key (s)' },
 ];
 
 function buildArgs(plan: TryPlan, apiKey: string, apiSecret: string) {
@@ -54,7 +53,9 @@ export async function wsAuthSelfTest(): Promise<void> {
     const finish = (ok: boolean, note: any = {}) => {
       if (done) return;
       done = true;
-      try { ws.close(); } catch {}
+      try {
+        ws.close();
+      } catch {}
       if (pingTimer) clearInterval(pingTimer);
       if (ok) logger.info({ ...note }, 'WS self-test: OK');
       else logger.warn({ ...note }, 'WS self-test: FAILED');
@@ -67,7 +68,10 @@ export async function wsAuthSelfTest(): Promise<void> {
       }
       const plan = plans[idx];
       const built = buildArgs(plan, key, sec);
-      logger.info({ attempt: plan.label, note: built.note }, 'WS self-test: auth attempt');
+      logger.info(
+        { attempt: plan.label, note: built.note },
+        'WS self-test: auth attempt'
+      );
       ws.send(JSON.stringify({ op: 'auth', args: built.args }));
     };
 
@@ -77,7 +81,9 @@ export async function wsAuthSelfTest(): Promise<void> {
         'WS self-test: open'
       );
       pingTimer = setInterval(() => {
-        try { ws.send(JSON.stringify({ op: 'ping', req_id: 'selftest' })); } catch {}
+        try {
+          ws.send(JSON.stringify({ op: 'ping', req_id: 'selftest' }));
+        } catch {}
       }, 20_000);
       tryAuth();
     });
@@ -91,7 +97,10 @@ export async function wsAuthSelfTest(): Promise<void> {
           const ok = !!msg.success;
           const retMsg = msg.ret_msg ?? msg.retMsg;
           if (!ok) {
-            logger.warn({ ret_msg: retMsg, attempt: plans[idx]?.label }, 'WS self-test: auth not ok');
+            logger.warn(
+              { ret_msg: retMsg, attempt: plans[idx]?.label },
+              'WS self-test: auth not ok'
+            );
             idx += 1;
             return tryAuth();
           }
@@ -101,7 +110,10 @@ export async function wsAuthSelfTest(): Promise<void> {
 
         if (msg.op === 'subscribe') {
           if (msg.success === true) return finish(true, { stage: 'subscribe' });
-          return finish(false, { stage: 'subscribe', ret_msg: msg.ret_msg ?? msg.retMsg });
+          return finish(false, {
+            stage: 'subscribe',
+            ret_msg: msg.ret_msg ?? msg.retMsg,
+          });
         }
       } catch (e) {
         return finish(false, { stage: 'parse', err: String(e) });

@@ -148,7 +148,7 @@ export const placeLimit = async (
   tag: string,
   clientId: string
 ) => {
-  const isTP = /^TP[1-4]$/i.test(tag);
+  const isTP = /^TP[1-3]$/i.test(tag);
   const side = isTP ? 'Buy' : 'Sell';
   const reduceOnly = isTP;
 
@@ -202,7 +202,11 @@ export const setTradingStop = async (
   opts: {
     sl?: number;
     tp?: number;
-    trailingStop?: { distanceAbs?: number; distancePct?: number; activePrice?: number };
+    trailingStop?: {
+      distanceAbs?: number;
+      distancePct?: number;
+      activePrice?: number;
+    };
   }
 ) => {
   let trailingStopAbs: number | undefined = undefined;
@@ -230,11 +234,11 @@ export const setTradingStop = async (
   });
 
   const retCode = Number(res?.retCode ?? -1);
-  const retMsg  = String(res?.retMsg ?? '');
+  const retMsg = String(res?.retMsg ?? '');
   if (retCode !== 0) {
     const err = new Error(`[setTradingStop] ret=${retCode} ${retMsg}`);
     (err as any).retCode = retCode;
-    (err as any).retMsg  = retMsg;
+    (err as any).retMsg = retMsg;
     throw err;
   }
   return { ok: true as const, retCode, retMsg };
@@ -243,7 +247,7 @@ export const setTradingStop = async (
 const tryPlacePartialTP = async (
   symbol: string,
   price: number,
-  qty: number,
+  qty: number
 ) => {
   const res: any = await bybit.setTradingStop({
     category: CATEGORY,
@@ -394,30 +398,34 @@ export const placeProfitLockStopShort = async (
     throw new Error(`[placeProfitLockStopShort] invalid qty: ${qty}`);
   }
   if (!(Number.isFinite(triggerPrice) && triggerPrice > 0)) {
-    throw new Error(`[placeProfitLockStopShort] invalid triggerPrice: ${triggerPrice}`);
+    throw new Error(
+      `[placeProfitLockStopShort] invalid triggerPrice: ${triggerPrice}`
+    );
   }
 
   const res: any = await bybit.submitOrder({
     category: 'linear',
     symbol,
-    side: 'Buy',               // close SHORT
-    orderType: 'Market',       // market close
-    qty: String(qty),          // string! wajib
-    reduceOnly: true,          // close-only
-    triggerPrice: String(triggerPrice), // harga pemicu
-    triggerBy: 'LastPrice',   // optional; bisa 'LastPrice'/'IndexPrice'/'MarkPrice' (jika tipe menerima)
-    triggerDirection: 1,      // 1 = trigger on price rising (cocok utk stop SHORT)
-    positionIdx: 0,           // one-way
-    timeInForce: 'IOC',       // aman utk market
-    orderLinkId: `LOCKTP1-${Date.now()}`
+    side: 'Buy',
+    orderType: 'Market',
+    qty: String(qty),
+    reduceOnly: true,
+    triggerPrice: String(triggerPrice),
+    triggerBy: 'LastPrice',
+    triggerDirection: 1,
+    positionIdx: 0,
+    timeInForce: 'IOC',
+    orderLinkId: `LOCKTP1-${Date.now()}`,
   });
 
   const retCode = Number(res?.retCode ?? -1);
-  const retMsg  = String(res?.retMsg ?? '');
+  const retMsg = String(res?.retMsg ?? '');
   if (retCode !== 0) {
-    const err = new Error(`[placeProfitLockStopShort] ret=${retCode} ${retMsg}`);
+    const err = new Error(
+      `[placeProfitLockStopShort] ret=${retCode} ${retMsg}`
+    );
     (err as any).retCode = retCode;
-    (err as any).retMsg  = retMsg;
+    (err as any).retMsg = retMsg;
     throw err;
   }
   return { ok: true as const };
