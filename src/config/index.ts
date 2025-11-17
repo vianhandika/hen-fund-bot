@@ -7,7 +7,7 @@ const EnvSchema = z.object({
   BYBIT_API_KEY: z.string().min(1),
   BYBIT_API_SECRET: z.string().min(1),
   BYBIT_ACCOUNT_TYPE: z.enum(['contract', 'unified']).default('contract'),
-  BYBIT_LEVERAGE: z.coerce.number().int().positive().default(10),
+  BYBIT_LEVERAGE: z.coerce.number().int().default(0),
   ENTRY_USD: z.coerce.number().int().positive().default(1),
   ENTRY_MULT: z.coerce.number().positive().default(1),
 
