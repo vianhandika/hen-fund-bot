@@ -12,24 +12,23 @@ import {
 import { shouldSkipByWindowAndFunding } from '../core/risk/guard.js';
 import { makeInitialPlanByQty } from '../core/planner/plan.short.js';
 import { DealState } from '../core/types.js';
-import { releaseSymbol, tryAcquireSymbol, withSymbolLock } from '../core/concurrency/lock.js';
+import {
+  releaseSymbol,
+  tryAcquireSymbol,
+  withSymbolLock,
+} from '../core/concurrency/lock.js';
 
 import {
   getMeta,
   placeEntryShort,
   placeDCAOrders,
   placePositionTPs,
-  buildShortTPPrices,
   calcEntryQtyFromNotional,
   waitUntilPositionVisible,
 } from './order.service.js';
 
-import { setTradingStop, getLastPrice, getOpenOrders } from '../adapters/bybit.rest.js';
-import {
-  TRAILING_AFTER_TP3,
-  PRE_TP1_SL_MULT,
-  SHORT_ONLY,
-} from '../config/constants.js';
+import { getLastPrice, getOpenOrders } from '../adapters/bybit.rest.js';
+import { SHORT_ONLY } from '../config/constants.js';
 import { startWatcherForSymbol } from './watcher.service.js';
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -42,7 +41,10 @@ export const isSymbolBusy = async (symbol: string) => {
   if (queued.some((s: any) => s?.symbol === symbol)) return true;
 
   const got = await tryAcquireSymbol(symbol);
-  if (got) { await releaseSymbol(symbol); return false; }
+  if (got) {
+    await releaseSymbol(symbol);
+    return false;
+  }
   return true;
 };
 
@@ -99,16 +101,22 @@ export const runOrchestratorTick = async () => {
           minNotionalUSD: meta.minNotionalUSD,
         });
       } else {
-        entryQtyReq = Math.max(meta.minOrderQty * ENV.ENTRY_MULT, meta.minOrderQty);
+        entryQtyReq = Math.max(
+          meta.minOrderQty * ENV.ENTRY_MULT,
+          meta.minOrderQty
+        );
       }
 
-      const entry = await placeEntryShort(s.symbol, entryQtyReq, ENV.BYBIT_LEVERAGE, meta);
+      const entry = await placeEntryShort(
+        s.symbol,
+        entryQtyReq,
+        ENV.BYBIT_LEVERAGE,
+        meta
+      );
 
       const pos = await waitUntilPositionVisible(s.symbol, 6000);
       if (!pos) {
         logger.error({ symbol: s.symbol }, 'entry not visible → abort');
-        // (opsional) bersihkan DCA kalau sempat kepasang
-        // try { await cancelAllDCA(s.symbol); } catch {}
         return true;
       }
 
@@ -122,7 +130,7 @@ export const runOrchestratorTick = async () => {
         ENV.BYBIT_LEVERAGE
       );
 
-      // 4) DCA SELL (3 legs)
+      // 4) DCA SELL (4 legs)
       await placeDCAOrders(
         s.symbol,
         plan.dca.map((d) => ({ id: d.id, price: d.price, qty: d.qty })),
@@ -131,25 +139,15 @@ export const runOrchestratorTick = async () => {
 
       await sleep(200);
 
-      // 5) SL pra-TP1 dipasang dulu
-      const slPrice = Number((plan.avgPrice * PRE_TP1_SL_MULT).toFixed(10));
-      await setTradingStop(s.symbol, { sl: slPrice });
-
-      // 6) TP partial (atau RO fallback otomatis)
+      // 5) TP partial (RO reduce-only) — 3 TP dari AVG: 2.5%, 5%, 10%
       await placePositionTPs(
         s.symbol,
         plan.avgPrice,
-        entry.qty, // qty partial berbasis entry qty; TRIM_PCTS menentukan porsinya
+        entry.qty, // TRIM_PCTS menentukan pembagian
         meta
       );
 
-      // 7) Trailing aktif SETELAH TP3: activePrice = harga TP3, retracement by RATE (distancePct)
-      const [ , , tp3 ] = buildShortTPPrices(plan.avgPrice);
-      await setTradingStop(s.symbol, {
-        trailingStop: { distancePct: TRAILING_AFTER_TP3, activePrice: tp3 },
-      });
-
-      // 8) (opsional) capture open orders saat init, supaya keliatan di log
+      // 6) (opsional) capture open orders saat init, supaya keliatan di log
       const openOrders = await getOpenOrders(s.symbol).catch(() => []);
       logger.info(
         {
@@ -157,29 +155,33 @@ export const runOrchestratorTick = async () => {
           entry: { price: entry.price, qty: entry.qty },
           dca: plan.dca.map((d) => ({ id: d.id, p: d.price, q: d.qty })),
           tp: plan.tp.map((t) => ({ id: t.id, p: t.price, take: t.takePct })),
-          sl: { preTp1: slPrice, trailing: { after: tp3, cb: TRAILING_AFTER_TP3 } },
           openOrders: openOrders
-            .filter((o: any) => /^(DCA[1-3]|TP[1-4])/.test(String(o.orderLinkId || '')))
+            .filter((o: any) =>
+              /^(DCA[1-4]|TP[1-3])/.test(String(o.orderLinkId || ''))
+            )
             .map((o: any) => ({
               type: String(o.orderLinkId || '').split('-')[0],
               price: Number(o.price ?? 0),
               qty: Number(o.qty ?? 0),
               orderLinkId: o.orderLinkId,
-              orderId: o.orderId
+              orderId: o.orderId,
             })),
         },
         'orchestrator: plan initialized'
       );
 
-      // 9) persist state
+      // 7) persist state
       await writeState(s.symbol, plan);
 
-      // 🔴 10) START WATCHER UNTUK SYMBOL INI
+      // 8) START WATCHER UNTUK SYMBOL INI
       try {
         await startWatcherForSymbol(s.symbol);
         logger.info({ symbol: s.symbol }, 'watcher started from orchestrator');
       } catch (e) {
-        logger.error({ symbol: s.symbol, err: String((e as any)?.message ?? e) }, 'start watcher failed');
+        logger.error(
+          { symbol: s.symbol, err: String((e as any)?.message ?? e) },
+          'start watcher failed'
+        );
       }
 
       return true;
