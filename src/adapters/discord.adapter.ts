@@ -1,8 +1,9 @@
-import { ActivityType, Client, GatewayIntentBits } from 'discord.js';
+import { ActivityType, Client, GatewayIntentBits, TextChannel } from 'discord.js';
 import { ENV } from '../config/index.js';
 import { logger } from '../utils/logger.js';
 import dayjs from '../utils/time.js';
-import { ingestSignal } from '../services/orchestrator.service.js';
+// DISABLED: trading pipeline
+// import { ingestSignal } from '../services/orchestrator.service.js';
 
 type Parsed = { symbol: string; fundingRate: number; createdAt: string } | null;
 
@@ -244,7 +245,9 @@ export const startDiscord = async () => {
   }
 
   const alertId = process.env.DISCORD_ALERT_CHANNEL_ID;
-  const manualId = process.env.DISCORD_MANUAL_CHANNEL_ID;
+  // DISABLED: manual channel no longer listened to
+  // const manualId = process.env.DISCORD_MANUAL_CHANNEL_ID;
+  const targetId = process.env.DISCORD_TARGET_CHANNEL_ID;
 
   const client = new Client({
     intents: [
@@ -257,49 +260,60 @@ export const startDiscord = async () => {
   client.on('ready', () => {
     client.user?.setPresence({
       status: 'online',
-      activities: [{ name: 'Bybit DCA (SHORT)', type: ActivityType.Watching }],
+      activities: [{ name: 'Forwarding alerts', type: ActivityType.Watching }],
     });
-    logger.info({ user: client.user?.tag }, 'Discord connected');
+    logger.info({ user: client.user?.tag }, 'Discord connected (forward-only mode)');
   });
 
   client.on('messageCreate', async (msg) => {
     try {
       let parsed: Parsed = null;
 
+      // Only listen to alert channel
       if (alertId && msg.channelId === alertId) {
         parsed = parseFromEmbed(msg);
       }
 
-      if (!parsed && manualId && msg.channelId === manualId && !msg.author.bot) {
-        parsed = parseManual(msg.content);
-      }
+      // DISABLED: manual channel
+      // if (!parsed && manualId && msg.channelId === manualId && !msg.author.bot) {
+      //   parsed = parseManual(msg.content);
+      // }
 
       if (!parsed) return;
 
-      const accepted = await ingestSignal(parsed);
+      // DISABLED: trading pipeline — just forward to target channel
+      // const accepted = await ingestSignal(parsed);
+      // if (accepted) { ... } else { ... }
 
-      if (accepted) {
-        logger.info(
-          {
-            symbol: parsed.symbol,
-            fr: parsed.fundingRate,
-            at: parsed.createdAt,
-            ch: msg.channelId,
-          },
-          'Signal queued (Discord)'
-        );
-        await msg.react('✅').catch(() => {});
+      logger.info(
+        {
+          symbol: parsed.symbol,
+          fr: parsed.fundingRate,
+          at: parsed.createdAt,
+          ch: msg.channelId,
+        },
+        'Signal parsed — forwarding to target channel'
+      );
+
+      // Forward the original embed/message to the target channel
+      if (targetId) {
+        const targetChannel = client.channels.cache.get(targetId);
+        if (targetChannel?.isTextBased()) {
+          const textChannel = targetChannel as TextChannel;
+          const content = msg.content || undefined;
+          const embeds = msg.embeds.length > 0 ? [...msg.embeds.values()] : undefined;
+          await textChannel.send({ content, embeds }).catch((e) =>
+            logger.error({ err: String(e) }, 'Failed to forward to target channel')
+          );
+          await msg.react('📤').catch(() => {});
+          logger.info({ symbol: parsed.symbol, target: targetId }, 'Message forwarded');
+        } else {
+          logger.warn({ targetId }, 'Target channel not found or not text-based');
+          await msg.react('⚠️').catch(() => {});
+        }
       } else {
-        logger.info(
-          {
-            symbol: parsed.symbol,
-            fr: parsed.fundingRate,
-            at: parsed.createdAt,
-            ch: msg.channelId,
-          },
-          'Signal rejected (Discord)'
-        );
-        await msg.react('⏭️').catch(() => {}); 
+        logger.warn('DISCORD_TARGET_CHANNEL_ID not set — nothing to forward to');
+        await msg.react('⚠️').catch(() => {});
       }
     } catch (e) {
       logger.error(e, 'Discord handler error');
